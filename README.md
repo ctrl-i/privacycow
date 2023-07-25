@@ -20,11 +20,11 @@ or
 ```console
 python3 -m venv venv
 source venv/bin/activate
-python -m pip install git+ssh://git@github.com:schemen/privacycow.git#egg=privacycow
+python -m pip install git+ssh://git@github.com:ctrl-i/privacycow.git#egg=privacycow
 ```
 
 ```x-sh
-git clone https://github.com/schemen/privacycow.git && cd privacycow
+git clone https://github.com/ctrl-i/privacycow.git && cd privacycow
 virtualenv venv -p python3
 source venv/bin/activate
 pip install -r requirements.txt
