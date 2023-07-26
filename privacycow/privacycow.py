@@ -80,7 +80,7 @@ def list(ctx):
     """Lists all aliases with the configured privacy domain."""
     API_ENDPOINT = "/api/v1/get/alias/all"
     headers = {'X-API-Key': MAILCOW_API_KEY}
-    possible_domains = [RELAY_DOMAIN] + [ccc for ccc in config.sections() if ccc != RELAY_DOMAIN]
+    possible_domains = get_possible_domains()
 
     try:
         r = requests.get(MAILCOW_INSTANCE + API_ENDPOINT, headers=headers, )
@@ -112,16 +112,21 @@ def list(ctx):
               help='Goto address "mail@example.com". If no option is passed, GOTO env variable or config.ini will be used.')
 @click.option('-c', '--comment', default=None,
               help='Public Comment string, use "service description" as an example. If no option is passed, comment will be empty.')
+@click.option('-r', '--random-domain', default=False, is_flag=True,
+              help='Use a random domain from the config file. If no option is passed, the DEFAULT GOTO will be used.')
 @click.pass_context
-def add(ctx, goto, comment):
+def add(ctx, goto, comment, random_domain):
     """Create a new random alias."""
     API_ENDPOINT = "/api/v1/add/alias"
     headers = {'X-API-Key': MAILCOW_API_KEY}
 
+    domain_to_use = RELAY_DOMAIN if not random_domain else choice(get_possible_domains())
+
     address = generate_realish_name(TEMPLATE) if TEMPLATE is not None else (
         f'{readable_random_string(randint(3, 9))}.'
         f'{readable_random_string(randint(3, 9))}')
-    address = f'{address}@{RELAY_DOMAIN}'
+    address = f'{address}@{domain_to_use}'
+
     data = {"address":  address,
             "goto": goto,
             "public_comment": comment,
@@ -365,6 +370,11 @@ def generate_realish_name(template):
 
     # return the re-generated template string
     return template
+
+
+def get_possible_domains():
+    """return a list of possible domains"""
+    return [RELAY_DOMAIN] + [ccc for ccc in config.sections() if ccc != RELAY_DOMAIN]
 
 
 # Mailcow IPv6 support relies on a docker proxy which in case would nullify the use of the whitelist.
