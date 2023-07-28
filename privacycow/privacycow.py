@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import configparser
 import re
-from random import choice, randint, randrange
 import socket
-from os import environ as env, makedirs
-from os.path import isfile, expanduser
+from os import environ as env
+from os import makedirs
+from os.path import expanduser, isfile
+from random import choice, randint, randrange
 from shutil import copyfile
 
 import click
@@ -13,8 +14,9 @@ import texttable
 import urllib3.util.connection as urllib3_cn
 from faker import Faker
 from faker.providers import person
-from unidecode import unidecode
 from pkg_resources import Requirement, resource_filename
+from questionary import confirm, select, text
+from unidecode import unidecode
 
 
 def read_config(file):
@@ -114,19 +116,34 @@ def list(ctx):
               help='Public Comment string, use "service description" as an example. If no option is passed, comment will be empty.')
 @click.option('-r', '--random-domain', default=False, is_flag=True,
               help='Use a random domain from the config file. If no option is passed, the DEFAULT GOTO will be used.')
+@click.option('-a', '--automatic', default=False, is_flag=True,
+              help='Just automatically pick a new alias.')
 @click.pass_context
-def add(ctx, goto, comment, random_domain):
+def add(ctx, goto, comment, random_domain, automatic):
     """Create a new random alias."""
     API_ENDPOINT = "/api/v1/add/alias"
     headers = {'X-API-Key': MAILCOW_API_KEY}
 
-    domain_to_use = RELAY_DOMAIN if not random_domain else choice(get_possible_domains())
+    address, domain_to_use = (None, None) if not automatic else (
+        generate_mailcow_username(), RELAY_DOMAIN)
+    while address is None or domain_to_use is None:
+        if domain_to_use is None:
+            domain_to_use = pick_domain() if not random_domain else (
+                choice(get_possible_domains()))
+        if address is None:
+            address = pick_username(TEMPLATE) if TEMPLATE is not None else (
+                generate_mailcow_username())
 
-    address = generate_realish_name(TEMPLATE) if TEMPLATE is not None else (
-        f'{readable_random_string(randint(3, 9))}.'
-        f'{readable_random_string(randint(3, 9))}')
+        try:
+            if not confirm(
+                    f'Do you want to use {address}@{domain_to_use}?',
+                    qmark='>',
+                    default=True).unsafe_ask():
+                address, domain_to_use = None, None
+        except KeyboardInterrupt:
+            raise SystemExit('User exited.')
+
     address = f'{address}@{domain_to_use}'
-
     data = {"address":  address,
             "goto": goto,
             "public_comment": comment,
@@ -358,23 +375,76 @@ def generate_realish_name(template):
     # remove accented characters and make lower case
     template = unidecode(template).lower()
 
+    # return the re-generated template string
+    return validate_username(template)
+
+
+def validate_username(template):
+    """make sure the username is valid"""
     # check the username is valid for an email address
     # see: https://emailregex.com/
     username = re.compile(
         r'(?:[a-z0-9!#$%&\'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&\'*+/=^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")')
     if not re.fullmatch(username, template):
-        raise ValueError(
+        raise SystemExit(
             'There was an error when generating a real-ish username, '
             'please check the TEMPLATE value in your config file for '
             f'[{RELAY_DOMAIN}] - "{template}" is not valid.')
-
-    # return the re-generated template string
     return template
 
 
 def get_possible_domains():
     """return a list of possible domains"""
     return [RELAY_DOMAIN] + [ccc for ccc in config.sections() if ccc != RELAY_DOMAIN]
+
+
+def generate_mailcow_username():
+    """generate a username like those used in mailcow"""
+    return (
+        f'{readable_random_string(randint(3, 9))}.'
+        f'{readable_random_string(randint(3, 9))}')
+
+
+def pick_username(template):
+    """let the user pick a username"""
+    try:
+        usernames = [
+            generate_mailcow_username(),
+            'none of these',
+            'choose my own',
+            'quit']
+        while len(usernames) < 13:
+            usernames.insert(0, generate_realish_name(template))
+        usernames = select(
+            'Which username do you want to use?',
+            qmark='>',
+            choices=usernames).unsafe_ask()
+        if usernames == 'quit':
+            raise SystemExit('User quit.')
+        elif usernames == 'choose my own':
+            return validate_username(text(
+                'Enter the username you want to use:',
+                qmark='>').unsafe_ask())
+        elif usernames == 'none of these':
+            return pick_username(template)
+        else:
+            return usernames
+    except SystemExit as err:
+        raise SystemExit(err)
+    except (BaseException, KeyboardInterrupt):
+        return generate_mailcow_username()
+
+
+def pick_domain():
+    """let the user pick the domain"""
+    try:
+        return select(
+            'Which domain do you wish to use?',
+            choices=get_possible_domains(),
+            qmark='>'
+        ).unsafe_ask()
+    except BaseException:
+        return RELAY_DOMAIN
 
 
 # Mailcow IPv6 support relies on a docker proxy which in case would nullify the use of the whitelist.
